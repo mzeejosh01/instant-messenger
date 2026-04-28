@@ -11,6 +11,8 @@ Werkzeug==3.1.8
 
 # Client (SocketIO connection from Tkinter)
 # python-socketio is already listed above (shared library)
+requests>=2.28.0
+websocket-client>=1.6.0
 
 # Optional — only needed for inline image display in the chat
 # If not installed, images will show as "[image]" placeholder
