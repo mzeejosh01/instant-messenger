@@ -1,19 +1,30 @@
-from flask import Flask, send_from_directory
+"""
+server/app.py - Flask-SocketIO application factory.
+
+Creates the Flask app and SocketIO instance, then registers all
+event handlers from socket_handler.py.
+"""
+
+from flask import Flask
 from flask_socketio import SocketIO
 
-app = Flask(__name__, static_folder="../client", static_url_path="")
-app.config['SECRET_KEY'] = 'secret!'
+from server.socket_handler import RoomManager, register_handlers
 
-socketio = SocketIO(app, cors_allowed_origins="*")
 
-@app.route('/')
-def serve_index():
-    return send_from_directory(app.static_folder, "index.html")
+def create_server() -> tuple[Flask, SocketIO]:
+    """
+    Build and configure the Flask-SocketIO server.
 
-@socketio.on('connect')
-def handle_connect():
-    print("A user connected!")
+    Returns:
+        tuple: (Flask app, SocketIO instance)
+    """
+    app = Flask(__name__)
+    app.config["SECRET_KEY"] = "apc-vub-2025-secret"
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    print("A user disconnected!")
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+    # One shared RoomManager for the lifetime of the server
+    manager = RoomManager()
+    register_handlers(socketio, manager)
+
+    return app, socketio
