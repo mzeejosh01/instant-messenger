@@ -37,9 +37,12 @@ client/
 - Join public rooms (#general, #random)
 - Send and receive text messages in real time
 - Send images (PNG/JPG/GIF) — displayed inline if Pillow is installed
-- Create private rooms
-- Invite users to private rooms
-- Member list per room
+- Create public rooms — visible to all connected users immediately
+- Create private rooms — invite-only
+- Invite users to private rooms (inviter gets a confirmation, invitee gets a pop-up)
+- Leave any room via the "← Leave room" button
+- Member list per room (right panel)
+- Online users list shown at all times (right panel, updates live)
 - Message history when joining a room
 
 ## OOP structure

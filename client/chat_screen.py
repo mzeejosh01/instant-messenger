@@ -34,6 +34,10 @@ class ChatScreen(tk.Frame):
         self.public_rooms: list[dict] = public_rooms
         self.active_room: str | None = None
 
+        # Track which rooms this client has actually joined on the server.
+        # Fixes the re-join bug: we only emit join_room when not yet in this set.
+        self._joined_rooms: set[str] = set()
+
         # Keep per-room message widgets so we can hide/show them
         # { room_name: [list of (sender, timestamp, content, type)] }
         self._message_store: dict[str, list[dict]] = {}
@@ -71,10 +75,14 @@ class ChatScreen(tk.Frame):
         btn_frame = tk.Frame(left, bg="#181825")
         btn_frame.pack(fill="x", padx=6, pady=6)
 
+        ttk.Button(btn_frame, text="＋ Public room",
+                   command=self._create_public_room_dialog).pack(fill="x", pady=2)
         ttk.Button(btn_frame, text="＋ Private room",
                    command=self._create_private_room_dialog).pack(fill="x", pady=2)
         ttk.Button(btn_frame, text="✉ Invite user",
                    command=self._invite_user_dialog).pack(fill="x", pady=2)
+        ttk.Button(btn_frame, text="← Leave room",
+                   command=self._leave_room).pack(fill="x", pady=2)
 
         # ── Centre panel: messages + input ──────────────────────────
         centre = tk.Frame(self, bg="#1e1e2e")
@@ -100,14 +108,31 @@ class ChatScreen(tk.Frame):
         scrollbar.grid(row=1, column=1, sticky="ns")
         self._msg_display.config(yscrollcommand=scrollbar.set)
 
-        # Text colour tags
-        self._msg_display.tag_config("sender", foreground="#cba6f7",
-                                     font=("Helvetica", 11, "bold"))
-        self._msg_display.tag_config("timestamp", foreground="#6c7086",
-                                     font=("Helvetica", 9))
-        self._msg_display.tag_config("content", foreground="#cdd6f4")
-        self._msg_display.tag_config("system", foreground="#a6e3a1",
-                                     font=("Helvetica", 10, "italic"))
+        # Tags for YOUR OWN messages — right-aligned, blue tones
+        self._msg_display.tag_config(
+            "own_sender", foreground="#89b4fa",
+            font=("Helvetica", 11, "bold"), justify="right")
+        self._msg_display.tag_config(
+            "own_timestamp", foreground="#6c7086",
+            font=("Helvetica", 9), justify="right")
+        self._msg_display.tag_config(
+            "own_content", foreground="#89dceb",
+            justify="right", lmargin1=80, lmargin2=80)
+
+        # Tags for OTHER PEOPLE'S messages — left-aligned, purple tones
+        self._msg_display.tag_config(
+            "other_sender", foreground="#cba6f7",
+            font=("Helvetica", 11, "bold"), justify="left")
+        self._msg_display.tag_config(
+            "other_timestamp", foreground="#6c7086",
+            font=("Helvetica", 9), justify="left")
+        self._msg_display.tag_config(
+            "other_content", foreground="#cdd6f4",
+            justify="left")
+
+        self._msg_display.tag_config(
+            "system", foreground="#a6e3a1",
+            font=("Helvetica", 10, "italic"))
 
         # Input row
         input_row = tk.Frame(centre, bg="#313244")
@@ -136,7 +161,20 @@ class ChatScreen(tk.Frame):
             right, bg="#181825", fg="#a6e3a1",
             font=("Helvetica", 11), relief="flat", bd=0, activestyle="none",
         )
-        self._member_listbox.pack(fill="both", expand=True, padx=4, pady=(0, 8))
+        self._member_listbox.pack(fill="both", expand=True, padx=4, pady=(0, 4))
+
+        # Thin divider line between Members and Online sections
+        tk.Frame(right, bg="#313244", height=1).pack(fill="x", padx=8, pady=4)
+
+        tk.Label(right, text="Online", font=("Helvetica", 12, "bold"),
+                 bg="#181825", fg="#cdd6f4").pack(pady=(0, 4), padx=8, anchor="w")
+
+        self._online_listbox = tk.Listbox(
+            right, bg="#181825", fg="#89b4fa",
+            font=("Helvetica", 11), relief="flat", bd=0, activestyle="none",
+            height=6,
+        )
+        self._online_listbox.pack(fill="x", padx=4, pady=(0, 8))
 
     # ------------------------------------------------------------------
     # Room list population
@@ -164,13 +202,16 @@ class ChatScreen(tk.Frame):
     def handle_event(self, event: str, data: dict) -> None:
         """Route a server event to the correct handler method."""
         handlers = {
-            "room_joined":     self._on_room_joined,
-            "room_created":    self._on_room_created,
-            "new_message":     self._on_new_message,
-            "user_joined":     self._on_user_joined,
-            "user_left":       self._on_user_left,
-            "invited_to_room": self._on_invited,
-            "error":           self._on_server_error,
+            "room_joined":        self._on_room_joined,
+            "room_created":       self._on_room_created,
+            "new_message":        self._on_new_message,
+            "user_joined":        self._on_user_joined,
+            "user_left":          self._on_user_left,
+            "invited_to_room":    self._on_invited,
+            "invite_sent":        self._on_invite_sent,
+            "user_list_update":   self._on_user_list_update,
+            "public_room_created": self._on_public_room_created,
+            "error":              self._on_server_error,
         }
         handler = handlers.get(event)
         if handler:
@@ -182,15 +223,17 @@ class ChatScreen(tk.Frame):
 
     def _on_room_joined(self, data: dict) -> None:
         room_name = data["room"]
+        self._joined_rooms.add(room_name)   # remember we have joined this room
         self.active_room = room_name
         self._room_title.config(text=f"# {room_name}")
 
-        # Rebuild message display from history
+        # Store the full history so switching back to this room works correctly
+        self._message_store[room_name] = data.get("history", [])
         self._member_store[room_name] = data.get("members", [])
         self._refresh_member_list()
 
         self._clear_messages()
-        for msg in data.get("history", []):
+        for msg in self._message_store[room_name]:
             self._render_message(msg)
 
     def _on_room_created(self, data: dict) -> None:
@@ -245,6 +288,28 @@ class ChatScreen(tk.Frame):
 
     def _on_server_error(self, data: dict) -> None:
         messagebox.showerror("Server error", data.get("message", "Unknown error"))
+
+    def _on_invite_sent(self, data: dict) -> None:
+        """Confirm to the inviter that their invite was delivered."""
+        target = data.get("target", "")
+        room = data.get("room", "")
+        messagebox.showinfo("Invite sent", f"Invited {target} to '{room}'.")
+
+    def _on_user_list_update(self, data: dict) -> None:
+        """Refresh the Online panel whenever someone joins or leaves."""
+        users = data.get("users", [])
+        self._online_listbox.delete(0, tk.END)
+        # Use list comprehension to build display strings (APC requirement)
+        display = [f"● {u}" for u in users]
+        for entry in display:
+            self._online_listbox.insert(tk.END, entry)
+
+    def _on_public_room_created(self, data: dict) -> None:
+        """Add a newly created public room to the room list."""
+        room = data["room"]
+        name = room["name"]
+        if name not in self._message_store:
+            self._add_room_to_list(name, private=False)
 
     # ------------------------------------------------------------------
     # Sending messages
@@ -301,21 +366,29 @@ class ChatScreen(tk.Frame):
         if room_name == self.active_room:
             return
 
-        # If not yet joined, send a join_room event
-        if room_name not in self._message_store or not self._member_store.get(room_name):
-            self.app.socket.emit("join_room", {"room": room_name})
-        else:
-            # Already joined — just switch the view locally
+        if room_name in self._joined_rooms:
+            # Already joined on the server — switch the view locally only
             self.active_room = room_name
             self._room_title.config(text=f"# {room_name}")
             self._clear_messages()
             for msg in self._message_store[room_name]:
                 self._render_message(msg)
             self._refresh_member_list()
+        else:
+            # Not yet joined — ask the server to add us
+            self.app.socket.emit("join_room", {"room": room_name})
 
     # ------------------------------------------------------------------
     # Dialogs
     # ------------------------------------------------------------------
+
+    def _create_public_room_dialog(self) -> None:
+        dialog = _SimpleInputDialog(
+            self, title="Create public room", prompt="Room name:"
+        )
+        name = dialog.result
+        if name:
+            self.app.socket.emit("create_public_room", {"room": name})
 
     def _create_private_room_dialog(self) -> None:
         dialog = _SimpleInputDialog(
@@ -324,6 +397,21 @@ class ChatScreen(tk.Frame):
         name = dialog.result
         if name:
             self.app.socket.emit("create_private_room", {"room": name})
+
+    def _leave_room(self) -> None:
+        """Leave the currently active room."""
+        if not self.active_room:
+            messagebox.showwarning("No room", "You are not in a room.")
+            return
+        self.app.socket.emit("leave_room", {"room": self.active_room})
+        # Remove the room from our joined set so clicking it will re-join
+        self._joined_rooms.discard(self.active_room)
+        self._message_store[self.active_room] = []   # clear stale messages
+        self._member_store[self.active_room] = []
+        self.active_room = None
+        self._room_title.config(text="Select a room")
+        self._clear_messages()
+        self._refresh_member_list()
 
     def _invite_user_dialog(self) -> None:
         if not self.active_room:
@@ -351,19 +439,25 @@ class ChatScreen(tk.Frame):
     def _render_message(self, msg: dict) -> None:
         """Append a single message dict to the message display widget."""
         self._msg_display.config(state="normal")
-        sender = msg.get("sender", "?")
-        ts = msg.get("timestamp", "")
+        sender   = msg.get("sender", "?")
+        ts       = msg.get("timestamp", "")
         msg_type = msg.get("type", "TextMessage")
 
-        self._msg_display.insert(tk.END, f"{sender} ", "sender")
-        self._msg_display.insert(tk.END, f"[{ts}]\n", "timestamp")
+        # Choose tag set based on whether this is our own message
+        is_own = (sender == self.app.username)
+        if is_own:
+            s_tag, ts_tag, c_tag = "own_sender", "own_timestamp", "own_content"
+        else:
+            s_tag, ts_tag, c_tag = "other_sender", "other_timestamp", "other_content"
+
+        self._msg_display.insert(tk.END, f"{sender} ", s_tag)
+        self._msg_display.insert(tk.END, f"[{ts}]\n", ts_tag)
 
         if msg_type == "TextMessage":
             content = msg.get("content", "")
-            self._msg_display.insert(tk.END, f"{content}\n\n", "content")
+            self._msg_display.insert(tk.END, f"{content}\n\n", c_tag)
         elif msg_type == "ImageMessage":
             caption = msg.get("caption", "")
-            # Attempt to display the image inline using PhotoImage
             try:
                 from PIL import Image, ImageTk  # type: ignore
                 image_data: str = msg.get("image_data", "")
@@ -371,16 +465,15 @@ class ChatScreen(tk.Frame):
                 img = Image.open(BytesIO(raw))
                 img.thumbnail((300, 300))
                 photo = ImageTk.PhotoImage(img)
-                # Keep a reference so the image isn't garbage collected
                 if not hasattr(self, "_photo_refs"):
                     self._photo_refs = []
                 self._photo_refs.append(photo)
                 self._msg_display.image_create(tk.END, image=photo)
                 self._msg_display.insert(tk.END, "\n")
             except Exception:
-                self._msg_display.insert(tk.END, "[image]\n", "content")
+                self._msg_display.insert(tk.END, "[image]\n", c_tag)
             if caption:
-                self._msg_display.insert(tk.END, f"{caption}\n", "content")
+                self._msg_display.insert(tk.END, f"{caption}\n", c_tag)
             self._msg_display.insert(tk.END, "\n")
 
         self._msg_display.config(state="disabled")
