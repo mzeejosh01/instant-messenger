@@ -129,6 +129,18 @@ class MessengerApp:
         def _invited(data):
             self.root.after(0, lambda: self._dispatch("invited_to_room", data))
 
+        @self.socket.on("invite_sent")
+        def _invite_sent(data):
+            self.root.after(0, lambda: self._dispatch("invite_sent", data))
+
+        @self.socket.on("user_list_update")
+        def _user_list_update(data):
+            self.root.after(0, lambda: self._dispatch("user_list_update", data))
+
+        @self.socket.on("public_room_created")
+        def _public_room_created(data):
+            self.root.after(0, lambda: self._dispatch("public_room_created", data))
+
         @self.socket.on("error")
         def _error(data):
             self.root.after(0, lambda: self._dispatch("error", data))

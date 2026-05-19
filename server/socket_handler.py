@@ -8,6 +8,7 @@ APC requirements met here:
   - list comprehension  : get_all_usernames(), get_public_rooms(), get_history_dicts()
   - filter              : get_user_by_name()
   - map                 : format_member_list() in join_room handler
+  - inheritance         : PublicRoom / PrivateRoom both extend BaseRoom
 """
 
 from flask import request
@@ -133,6 +134,8 @@ def register_handlers(socketio: SocketIO, manager: RoomManager) -> None:
             emit("user_left", {"username": user.username, "room": room_name},
                  to=room_name)
         print(f"[server] disconnect user={user.username}")
+        # Tell every client the updated online-user list
+        socketio.emit("user_list_update", {"users": manager.get_all_usernames()})
 
     # ------------------------------------------------------------------
     # Login
@@ -163,6 +166,8 @@ def register_handlers(socketio: SocketIO, manager: RoomManager) -> None:
             "username": username,
             "public_rooms": manager.get_public_rooms(),
         })
+        # Tell every client the updated online-user list
+        socketio.emit("user_list_update", {"users": manager.get_all_usernames()})
         print(f"[server] login     user={username}")
 
     # ------------------------------------------------------------------
@@ -297,6 +302,33 @@ def register_handlers(socketio: SocketIO, manager: RoomManager) -> None:
     # ------------------------------------------------------------------
     # Private rooms
     # ------------------------------------------------------------------
+
+    @socketio.on("create_public_room")
+    def on_create_public_room(data: dict):
+        """
+        Create a new public room (any user can do this).
+
+        Client sends:  { "room": str }
+        Server emits to ALL clients:
+          "public_room_created" → { "room": dict }
+        """
+        user = manager.get_user(request.sid)
+        if not user:
+            return
+
+        room_name = data.get("room", "").strip()
+        if not room_name:
+            emit("error", {"message": "Room name cannot be empty."})
+            return
+
+        room = manager.create_public_room(room_name)
+        if not room:
+            emit("error", {"message": f"Room '{room_name}' already exists."})
+            return
+
+        # Notify every connected client so their room list updates live
+        socketio.emit("public_room_created", {"room": room.to_dict()})
+        print(f"[server] public_room created={room_name} by={user.username}")
 
     @socketio.on("create_private_room")
     def on_create_private_room(data: dict):
