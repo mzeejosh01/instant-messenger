@@ -46,9 +46,14 @@ class BaseRoom:
         # add a new message to the room history
         self.history.append(message)
 
+    def message_generator(self):
+        # yield each message in the history one at a time (APC requirement: generator)
+        for message in self.history:
+            yield message
+
     def get_history_dicts(self) -> list[dict]:
-        # return all messages as a list of dictionaries (APC requirement: list comprehension)
-        return [msg.to_dict() for msg in self.history]
+        # use the generator to build a list of dictionaries (APC requirement: list comprehension)
+        return [msg.to_dict() for msg in self.message_generator()]
 
     def to_dict(self) -> dict:
         # return the room info as a plain dictionary
