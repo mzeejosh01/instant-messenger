@@ -1,14 +1,9 @@
-"""
-server/models/chatroom.py - Room class hierarchy.
-
-BaseRoom    (parent)
-├── PublicRoom   — open to all connected users
-└── PrivateRoom  — restricted to an invite list, has an owner
-
-Inheritance is used because every room type shares a name, member
-list, message history, and core join/leave/broadcast behaviour.
-Subclasses only differ in their access-control logic.
-"""
+# server/models/chatroom.py - room classes.
+#
+# BaseRoom is the parent class.
+# PublicRoom and PrivateRoom both inherit from it.
+# PublicRoom is open to everyone. PrivateRoom is invite-only.
+# We use inheritance because all rooms share the same basic behaviour.
 
 from __future__ import annotations
 from server.models.message import BaseMessage
@@ -19,9 +14,9 @@ class BaseRoom:
     Parent class for all room types.
 
     Attributes:
-        name    (str):              Unique room identifier.
-        members (list[str]):        Usernames of currently present users.
-        history (list[BaseMessage]):Ordered message log for this room.
+        name    (str):               the unique name of the room
+        members (list[str]):         usernames of people currently in the room
+        history (list[BaseMessage]): all messages sent in the room so far
     """
 
     def __init__(self, name: str) -> None:
@@ -29,47 +24,34 @@ class BaseRoom:
         self.members: list[str] = []
         self.history: list[BaseMessage] = []
 
-    # ------------------------------------------------------------------
-    # Membership
-    # ------------------------------------------------------------------
+    # membership methods
 
     def add_member(self, username: str) -> None:
-        """Add *username* if not already a member."""
+        # add the user only if they are not already in the room
         if username not in self.members:
             self.members.append(username)
 
     def remove_member(self, username: str) -> None:
-        """Remove *username* if present."""
+        # remove the user if they are in the room
         if username in self.members:
             self.members.remove(username)
 
-    # ------------------------------------------------------------------
-    # Access control (overridden by subclasses)
-    # ------------------------------------------------------------------
-
     def can_join(self, username: str) -> bool:
-        """Return True if *username* is allowed to join this room."""
+        # subclasses decide who is allowed to join
         raise NotImplementedError
 
-    # ------------------------------------------------------------------
-    # Message log
-    # ------------------------------------------------------------------
+    # message history methods
 
     def add_message(self, message: BaseMessage) -> None:
-        """Append a message to the room history."""
+        # add a new message to the room history
         self.history.append(message)
 
     def get_history_dicts(self) -> list[dict]:
-        """Return message history as a list of serialisable dicts.
-        Uses list comprehension (APC requirement).
-        """
+        # return all messages as a list of dictionaries (APC requirement: list comprehension)
         return [msg.to_dict() for msg in self.history]
 
-    # ------------------------------------------------------------------
-    # Serialisation
-    # ------------------------------------------------------------------
-
     def to_dict(self) -> dict:
+        # return the room info as a plain dictionary
         return {
             "name": self.name,
             "type": self.__class__.__name__,
@@ -86,39 +68,38 @@ class BaseRoom:
 
 class PublicRoom(BaseRoom):
     """
-    A public room — any logged-in user may join.
-    No additional attributes beyond BaseRoom.
+    A public room that any logged-in user can join.
     """
 
     def __init__(self, name: str) -> None:
         super().__init__(name)
 
     def can_join(self, username: str) -> bool:
-        """Public rooms are always joinable."""
+        # public rooms are always open
         return True
 
 
 class PrivateRoom(BaseRoom):
     """
-    A private room — only users on the invite list may join.
+    A private room that only invited users can join.
 
     Attributes:
-        owner   (str):       Username of the creator (auto-invited).
-        invited (list[str]): Usernames permitted to enter.
+        owner   (str):       the username of whoever created the room
+        invited (list[str]): usernames that are allowed to enter
     """
 
     def __init__(self, name: str, owner: str) -> None:
         super().__init__(name)
         self.owner: str = owner
-        self.invited: list[str] = [owner]   # owner is always invited
+        self.invited: list[str] = [owner]  # the owner is always on the invite list
 
     def invite(self, username: str) -> None:
-        """Grant *username* permission to join this room."""
+        # add a user to the invite list if they are not already on it
         if username not in self.invited:
             self.invited.append(username)
 
     def can_join(self, username: str) -> bool:
-        """Only invited users may join a private room."""
+        # only users on the invite list can join
         return username in self.invited
 
     def to_dict(self) -> dict:

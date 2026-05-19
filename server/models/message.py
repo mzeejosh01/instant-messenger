@@ -1,14 +1,9 @@
-"""
-server/models/message.py - Message class hierarchy.
-
-BaseMessage  (parent)
-├── TextMessage   — plain text chat message
-└── ImageMessage  — base64-encoded image with optional caption
-
-Inheritance is used here because every message type shares a sender,
-room, timestamp, and serialisation interface, while each subclass
-adds only its own payload fields.
-"""
+# server/models/message.py - message classes.
+#
+# BaseMessage is the parent class.
+# TextMessage and ImageMessage both inherit from it.
+# We use inheritance because all messages share sender, room, and timestamp.
+# Each subclass just adds its own extra data on top.
 
 from datetime import datetime, timezone
 
@@ -18,22 +13,20 @@ class BaseMessage:
     Parent class for all message types.
 
     Attributes:
-        sender    (str): Username of the message author.
-        room      (str): Name of the destination room.
-        timestamp (str): UTC time the message was created (HH:MM format).
+        sender    (str): the username of whoever sent the message
+        room      (str): the name of the room the message was sent to
+        timestamp (str): the time the message was created (HH:MM format)
     """
 
     def __init__(self, sender: str, room: str) -> None:
         self.sender: str = sender
         self.room: str = room
-        # Store a human-readable time string for display in the GUI
+        # save the current time as a readable string
         self.timestamp: str = datetime.now(timezone.utc).strftime("%H:%M")
 
     def to_dict(self) -> dict:
-        """
-        Serialise shared fields to a dict.
-        Subclasses call super().to_dict() and extend the result.
-        """
+        # return the shared fields as a dictionary
+        # subclasses call this and then add their own fields
         return {
             "type": self.__class__.__name__,
             "sender": self.sender,
@@ -50,12 +43,12 @@ class BaseMessage:
 
 class TextMessage(BaseMessage):
     """
-    A plain-text chat message.
+    A plain text chat message.
 
-    Inherits sender / room / timestamp from BaseMessage.
+    Inherits sender, room, and timestamp from BaseMessage.
 
     Attributes:
-        content (str): The text body of the message.
+        content (str): the text the user typed
     """
 
     def __init__(self, sender: str, room: str, content: str) -> None:
@@ -70,13 +63,13 @@ class TextMessage(BaseMessage):
 
 class ImageMessage(BaseMessage):
     """
-    A message carrying an image encoded as a base64 data-URI string.
+    A message that contains an image encoded as a base64 string.
 
-    Inherits sender / room / timestamp from BaseMessage.
+    Inherits sender, room, and timestamp from BaseMessage.
 
     Attributes:
-        image_data (str): Base64-encoded image (e.g. "data:image/png;base64,...").
-        caption    (str): Optional caption shown below the image.
+        image_data (str): the image encoded as a base64 data URI
+        caption    (str): optional text shown below the image
     """
 
     def __init__(

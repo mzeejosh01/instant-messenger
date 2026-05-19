@@ -1,14 +1,10 @@
-"""
-client/app.py - Tkinter root window and SocketIO client connection.
-
-This is the top-level client class. It:
-  1. Creates the Tk root window.
-  2. Opens a socketio-client connection to the server.
-  3. Switches between the LoginScreen and ChatScreen frames.
-
-All SocketIO callbacks run on a background thread, so any GUI update
-must be scheduled via root.after() to stay on the main thread.
-"""
+# client/app.py - the main application class.
+#
+# This creates the Tk window, connects to the server,
+# and switches between the login screen and the chat screen.
+#
+# SocketIO callbacks run on a background thread, so any GUI update
+# must go through root.after() to run on the main thread.
 
 import tkinter as tk
 import socketio as sio
@@ -19,19 +15,19 @@ from client.chat_screen import ChatScreen
 
 class MessengerApp:
     """
-    Root application class.
+    The root application class.
 
     Attributes:
-        root     (tk.Tk):       The Tk root window.
-        socket   (sio.Client):  python-socketio client.
-        username (str):         Set after a successful login.
-        current_frame           The frame currently visible.
+        root     (tk.Tk):      the main Tkinter window
+        socket   (sio.Client): the SocketIO client connection
+        username (str):        the username set after a successful login
+        current_frame:         whichever screen is currently showing
     """
 
     SERVER_URL = "http://127.0.0.1:5050"
 
     def __init__(self) -> None:
-        # ── Tk root ──────────────────────────────────────────────────
+        # create the main window
         self.root = tk.Tk()
         self.root.title("APC Instant Messenger")
         self.root.geometry("900x600")
@@ -40,21 +36,19 @@ class MessengerApp:
         self.username: str = ""
         self.current_frame = None
 
-        # ── SocketIO client ──────────────────────────────────────────
+        # set up the SocketIO client
         self.socket = sio.Client(reconnection=True)
         self._register_socket_events()
 
-        # Retry connecting — the server thread may need a moment to start.
+        # try connecting to the server a few times in case it is not ready yet
         self._connect_with_retry()
 
-        # ── Show login screen ────────────────────────────────────────
+        # show the login screen first
         self._show_login()
 
     def _connect_with_retry(self, attempts: int = 10, delay: float = 0.5) -> None:
-        """
-        Try to connect to the server in a background thread, retrying every
-        *delay* seconds. The server thread may need a moment to be ready.
-        """
+        # try connecting to the server in a background thread
+        # we retry a few times because the server thread might need a moment to start
         import time
         import threading
 
@@ -70,35 +64,31 @@ class MessengerApp:
 
         threading.Thread(target=_try, daemon=True).start()
 
-    # ------------------------------------------------------------------
-    # Screen switching
-    # ------------------------------------------------------------------
+    # screen switching
 
     def _show_login(self) -> None:
-        """Replace current frame with the LoginScreen."""
+        # replace the current screen with the login screen
         if self.current_frame:
             self.current_frame.destroy()
         self.current_frame = LoginScreen(self.root, self)
         self.current_frame.pack(fill="both", expand=True)
 
     def show_chat(self, username: str, public_rooms: list[dict]) -> None:
-        """Replace LoginScreen with the ChatScreen after successful login."""
+        # replace the login screen with the chat screen after a successful login
         self.username = username
         if self.current_frame:
             self.current_frame.destroy()
         self.current_frame = ChatScreen(self.root, self, public_rooms)
         self.current_frame.pack(fill="both", expand=True)
 
-    # ------------------------------------------------------------------
     # SocketIO event registration
-    # ------------------------------------------------------------------
 
     def _register_socket_events(self) -> None:
-        """Bind server events to handler methods."""
+        # connect each server event to a handler
+        # all GUI updates go through root.after() to stay on the main thread
 
         @self.socket.on("login_ok")
         def _login_ok(data):
-            # Schedule GUI work on the main thread
             self.root.after(0, lambda: self._on_login_ok(data))
 
         @self.socket.on("login_error")
@@ -145,36 +135,30 @@ class MessengerApp:
         def _error(data):
             self.root.after(0, lambda: self._dispatch("error", data))
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    # internal helpers
 
     def _on_login_ok(self, data: dict) -> None:
         self.show_chat(data["username"], data["public_rooms"])
 
     def _on_login_error(self, data: dict) -> None:
-        """Forward the error message to the login screen."""
+        # pass the error message to the login screen to display
         if isinstance(self.current_frame, LoginScreen):
             self.current_frame.show_error(data["message"])
 
     def _dispatch(self, event: str, data: dict) -> None:
-        """Forward a server event to the ChatScreen (if active)."""
+        # forward a server event to the chat screen if it is active
         if isinstance(self.current_frame, ChatScreen):
             self.current_frame.handle_event(event, data)
 
-    # ------------------------------------------------------------------
-    # Run
-    # ------------------------------------------------------------------
-
     def run(self) -> None:
-        """Start the Tk main loop (blocks until window is closed)."""
+        # start the Tkinter main loop
         self.root.mainloop()
-        # Clean up the socket when the window closes
+        # disconnect the socket when the window is closed
         if self.socket.connected:
             self.socket.disconnect()
 
 
 def launch_client() -> None:
-    """Module-level entry point called by Main.py."""
+    # entry point called from main.py
     app = MessengerApp()
     app.run()

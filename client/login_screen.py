@@ -1,10 +1,8 @@
-"""
-client/login_screen.py - Login screen frame.
-
-Shown on startup. The user enters a username and clicks Connect.
-Emits a "login" event to the server; the result is handled in
-MessengerApp._on_login_ok / _on_login_error.
-"""
+# client/login_screen.py - the login screen.
+#
+# This is the first screen the user sees.
+# They type a username and click Connect.
+# The result comes back as login_ok or login_error from the server.
 
 import tkinter as tk
 from tkinter import ttk
@@ -12,10 +10,10 @@ from tkinter import ttk
 
 class LoginScreen(tk.Frame):
     """
-    A Tkinter Frame that presents a username entry field and a Connect button.
+    The login screen frame.
 
     Attributes:
-        app: Reference to the parent MessengerApp instance.
+        app: reference to the MessengerApp so we can call socket methods
     """
 
     def __init__(self, parent: tk.Misc, app) -> None:
@@ -24,8 +22,7 @@ class LoginScreen(tk.Frame):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        """Construct and lay out all widgets."""
-        # Centre column
+        # centre everything on the screen
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -55,10 +52,10 @@ class LoginScreen(tk.Frame):
                           font=("Helvetica", 13))
         entry.pack(pady=(4, 16), ipady=6)
         entry.focus()
-        # Allow pressing Enter to connect
+        # pressing Enter does the same thing as clicking the button
         entry.bind("<Return>", lambda _: self._connect())
 
-        self._connect_btn = ttk.Button(card, text="Connect →", command=self._connect)
+        self._connect_btn = ttk.Button(card, text="Connect ->", command=self._connect)
         self._connect_btn.pack(fill="x", ipady=4)
 
         self._error_label = tk.Label(
@@ -68,21 +65,21 @@ class LoginScreen(tk.Frame):
         self._error_label.pack(pady=(10, 0))
 
     def _connect(self) -> None:
-        """Validate input and emit login event."""
+        # check the input and send the login event to the server
         username = self._username_var.get().strip()
         if not username:
             self.show_error("Please enter a username.")
             return
 
         if not self.app.socket.connected:
-            self.show_error("Not connected to server yet. Please wait…")
+            self.show_error("Not connected to server yet. Please wait...")
             return
 
-        self.show_error("")                     
+        self.show_error("")
         self._connect_btn.config(state="disabled")
         self.app.socket.emit("login", {"username": username})
 
     def show_error(self, message: str) -> None:
-        """Display an error message and re-enable the connect button."""
+        # show an error message and re-enable the button
         self._error_label.config(text=message)
         self._connect_btn.config(state="normal")

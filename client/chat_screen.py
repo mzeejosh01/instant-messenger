@@ -1,46 +1,41 @@
-"""
-client/chat_screen.py - Main chat interface frame.
-
-Layout:
-  ┌──────────────┬────────────────────────────┬──────────────┐
-  │  Room list   │      Message display        │ Member list  │
-  │  (left)      │      (centre)               │ (right)      │
-  │              ├────────────────────────────┤              │
-  │              │  Message input + Send btn  │              │
-  └──────────────┴────────────────────────────┴──────────────┘
-
-All server events are routed here via MessengerApp._dispatch → handle_event().
-"""
+# client/chat_screen.py - the main chat window shown after login.
+#
+# Layout:
+#   left panel   - list of rooms the user can join
+#   centre panel - message history and the input box
+#   right panel  - list of members and online users
+#
+# All server events come in through handle_event().
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import base64
 from io import BytesIO
 
-# ── Colour palette ────────────────────────────────────────────────────────────
+# colour palette used across the whole chat screen
 BG_DARK   = "#1e1e2e"   # main background
-BG_DARKER = "#181825"   # sidebar / panel background
-BG_PANEL  = "#313244"   # elevated surfaces (header, input row)
-BG_HOVER  = "#2a2a3e"   # room row hover state
-BG_ACTIVE = "#45475a"   # selected / active room row
-FG_MAIN   = "#cdd6f4"   # primary text
-FG_DIM    = "#6c7086"   # secondary text / timestamps
+BG_DARKER = "#181825"   # sidebar background
+BG_PANEL  = "#313244"   # header and input bar
+BG_HOVER  = "#2a2a3e"   # room row when hovered
+BG_ACTIVE = "#45475a"   # currently selected room row
+FG_MAIN   = "#cdd6f4"   # main text colour
+FG_DIM    = "#6c7086"   # dim text for timestamps etc.
 FG_GREEN  = "#a6e3a1"   # member list dots
-FG_BLUE   = "#89b4fa"   # online list / own-sender colour
-FG_PURPLE = "#cba6f7"   # other-sender colour
-FG_RED    = "#f38ba8"   # unread badge background
-FG_CYAN   = "#89dceb"   # own message content
-ACCENT    = "#cba6f7"   # accent stripe below header
+FG_BLUE   = "#89b4fa"   # online list and own message name
+FG_PURPLE = "#cba6f7"   # other people's message name
+FG_RED    = "#f38ba8"   # unread badge
+FG_CYAN   = "#89dceb"   # own message text
+ACCENT    = "#cba6f7"   # accent line under the header
 
 
 class ChatScreen(tk.Frame):
     """
-    Main chat frame shown after a successful login.
+    The main chat frame shown after login.
 
     Attributes:
-        app          : Reference to MessengerApp.
-        public_rooms : List of public room dicts from the server.
-        active_room  : Name of the currently displayed room (str | None).
+        app          : reference to MessengerApp
+        public_rooms : list of public room dicts from the server
+        active_room  : name of the room currently open (or None)
     """
 
     def __init__(self, parent: tk.Misc, app, public_rooms: list[dict]) -> None:
@@ -49,26 +44,26 @@ class ChatScreen(tk.Frame):
         self.public_rooms: list[dict] = public_rooms
         self.active_room: str | None = None
 
-        # Track which rooms this client has actually joined on the server.
-        # Fixes the re-join bug: we only emit join_room when not yet in this set.
+        # set of room names we have already joined on the server
+        # we only emit join_room if the room is not in this set
         self._joined_rooms: set[str] = set()
 
-        # Per-room message and member data
+        # message and member lists stored per room
         self._message_store: dict[str, list[dict]] = {}
         self._member_store:  dict[str, list[str]]  = {}
 
-        # Unread badge tracking  { room_name: count }
+        # how many unread messages each room has
         self._unread: dict[str, int] = {}
 
-        # Custom room-row widgets  { room_name: Frame }
+        # the Frame widget for each room row in the sidebar
         self._room_rows:      dict[str, tk.Frame]  = {}
-        # Badge canvas per room  { room_name: Canvas }
+        # the Canvas badge widget for each room
         self._badge_canvases: dict[str, tk.Canvas] = {}
 
-        # Placeholder state for the message entry
+        # tracks whether the placeholder text is currently showing
         self._placeholder_active: bool = False
 
-        # Keep PIL ImageTk references alive to avoid garbage-collection
+        # keep image references here so Python does not delete them
         self._photo_refs: list = []
 
         self._build_ui()
@@ -80,14 +75,14 @@ class ChatScreen(tk.Frame):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        """Build the three-column layout."""
+        # build the three-column layout
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
         self._build_left_panel()
         self._build_centre_panel()
         self._build_right_panel()
 
-    # ── Left panel ──────────────────────────────────────────────────────
+    # left panel
 
     def _build_left_panel(self) -> None:
         left = tk.Frame(self, bg=BG_DARKER, width=200)
@@ -96,13 +91,13 @@ class ChatScreen(tk.Frame):
         left.rowconfigure(1, weight=1)
         left.columnconfigure(0, weight=1)
 
-        # Section label
+        # section heading
         tk.Label(
             left, text="ROOMS",
             font=("Helvetica", 9, "bold"), bg=BG_DARKER, fg=FG_DIM,
         ).grid(row=0, column=0, sticky="w", padx=14, pady=(14, 8))
 
-        # ── Scrollable room list ─────────────────────────────────────
+        # scrollable list of rooms
         list_container = tk.Frame(left, bg=BG_DARKER)
         list_container.grid(row=1, column=0, sticky="nsew")
         list_container.rowconfigure(0, weight=1)
@@ -124,7 +119,7 @@ class ChatScreen(tk.Frame):
             (0, 0), window=self._room_list_inner, anchor="nw"
         )
 
-        # Keep inner frame width in sync with canvas width
+        # keep the inner frame the same width as the canvas
         self._room_list_inner.bind(
             "<Configure>",
             lambda e: self._room_canvas.configure(
@@ -135,7 +130,7 @@ class ChatScreen(tk.Frame):
             "<Configure>",
             lambda e: self._room_canvas.itemconfig(self._cw, width=e.width),
         )
-        # Mouse-wheel scrolling
+        # scroll with the mouse wheel
         self._room_canvas.bind(
             "<MouseWheel>",
             lambda e: self._room_canvas.yview_scroll(
@@ -143,10 +138,9 @@ class ChatScreen(tk.Frame):
             ),
         )
 
-        # ── Action buttons ────────────────────────────────────────────
-        # Note: we use tk.Label + bindings instead of tk.Button because on
-        # macOS the Aqua theme overrides tk.Button's bg, making the text
-        # unreadable. tk.Label always renders our colours faithfully.
+        # sidebar buttons
+        # we use tk.Label instead of tk.Button because on macOS, tk.Button
+        # ignores our background colour setting, but tk.Label always shows it
         btn_frame = tk.Frame(left, bg=BG_DARKER)
         btn_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=8)
 
@@ -155,7 +149,7 @@ class ChatScreen(tk.Frame):
         self._sidebar_btn(btn_frame, "✉  Invite user",  self._invite_user_dialog).pack(fill="x", pady=2)
         self._sidebar_btn(btn_frame, "← Leave room",   self._leave_room, danger=True).pack(fill="x", pady=2)
 
-    # ── Centre panel ─────────────────────────────────────────────────────
+    # centre panel
 
     def _build_centre_panel(self) -> None:
         centre = tk.Frame(self, bg=BG_DARK)
@@ -163,7 +157,7 @@ class ChatScreen(tk.Frame):
         centre.rowconfigure(1, weight=1)
         centre.columnconfigure(0, weight=1)
 
-        # ── Header bar ───────────────────────────────────────────────
+        # header bar at the top of the centre panel
         hdr = tk.Frame(centre, bg=BG_PANEL)
         hdr.grid(row=0, column=0, columnspan=2, sticky="ew")
         hdr.columnconfigure(0, weight=1)
@@ -175,7 +169,7 @@ class ChatScreen(tk.Frame):
         )
         self._room_title.grid(row=0, column=0, sticky="ew")
 
-        # Member count shown on the right side of the header
+        # member count label on the right side of the header
         self._member_count_label = tk.Label(
             hdr, text="",
             font=("Helvetica", 10), bg=BG_PANEL, fg=FG_DIM,
@@ -183,12 +177,12 @@ class ChatScreen(tk.Frame):
         )
         self._member_count_label.grid(row=0, column=1, sticky="e")
 
-        # Accent underline below the header
+        # thin accent line below the header
         tk.Frame(centre, bg=ACCENT, height=2).grid(
             row=0, column=0, columnspan=2, sticky="sew"
         )
 
-        # ── Message area (message display + welcome screen share this slot) ──
+        # message area - both the chat display and welcome screen go in this slot
         msg_area = tk.Frame(centre, bg=BG_DARK)
         msg_area.grid(row=1, column=0, columnspan=2, sticky="nsew")
         msg_area.rowconfigure(0, weight=1)
@@ -206,11 +200,11 @@ class ChatScreen(tk.Frame):
         self._msg_scrollbar.grid(row=0, column=1, sticky="ns")
         self._msg_display.config(yscrollcommand=self._msg_scrollbar.set)
 
-        # Welcome screen — occupies the same slot; toggled with the message display
+        # welcome screen sits in the same slot and is shown when no room is open
         self._welcome_frame = self._build_welcome_frame(msg_area)
         self._welcome_frame.grid(row=0, column=0, columnspan=2, sticky="nsew")
 
-        # Tags for YOUR OWN messages — right-aligned, blue tones
+        # tags for your own messages - right side, blue
         self._msg_display.tag_config(
             "own_sender", foreground=FG_BLUE,
             font=("Helvetica", 11, "bold"), justify="right")
@@ -221,7 +215,7 @@ class ChatScreen(tk.Frame):
             "own_content", foreground=FG_CYAN,
             justify="right", lmargin1=80, lmargin2=80, spacing3=8)
 
-        # Tags for OTHER PEOPLE'S messages — left-aligned, purple tones
+        # tags for other people's messages - left side, purple
         self._msg_display.tag_config(
             "other_sender", foreground=FG_PURPLE,
             font=("Helvetica", 11, "bold"), justify="left")
@@ -232,34 +226,35 @@ class ChatScreen(tk.Frame):
             "other_content", foreground=FG_MAIN,
             justify="left", spacing3=8)
 
-        # System / status messages — centred, green italic
+        # tags for system messages like "user joined"
         self._msg_display.tag_config(
             "system", foreground=FG_GREEN,
             font=("Helvetica", 10, "italic"), justify="center",
             spacing1=6, spacing3=6)
 
-        # ── Input row ────────────────────────────────────────────────
-        input_row = tk.Frame(centre, bg=BG_PANEL)
-        input_row.grid(row=2, column=0, columnspan=2, sticky="ew")
-        input_row.columnconfigure(0, weight=1)
+        # input row at the bottom of the centre panel
+        self._input_row = tk.Frame(centre, bg=BG_PANEL)
+        self._input_row.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self._input_row.columnconfigure(0, weight=1)
 
-        self._msg_entry = ttk.Entry(input_row, font=("Helvetica", 12))
+        self._msg_entry = ttk.Entry(self._input_row, font=("Helvetica", 12))
         self._msg_entry.grid(row=0, column=0, sticky="ew",
                              padx=(12, 6), pady=10, ipady=7)
         self._msg_entry.bind("<Return>", lambda _: self._send_message())
         self._setup_placeholder()
 
-        # Accent-coloured Send button
+        # send button
         tk.Button(
-            input_row, text="Send", command=self._send_message,
+            self._input_row, text="Send", command=self._send_message,
             font=("Helvetica", 11, "bold"),
             bg=ACCENT, fg=BG_DARK, relief="flat", bd=0,
             padx=16, pady=7, cursor="hand2",
             activebackground="#b48ad4", activeforeground=BG_DARK,
         ).grid(row=0, column=1, padx=4, pady=10)
 
+        # image upload button
         tk.Button(
-            input_row, text="📎", command=self._send_image,
+            self._input_row, text="📎", command=self._send_image,
             font=("Helvetica", 13),
             bg=BG_PANEL, fg=FG_MAIN, relief="flat", bd=0,
             padx=8, pady=6, cursor="hand2",
@@ -267,17 +262,9 @@ class ChatScreen(tk.Frame):
         ).grid(row=0, column=2, padx=(0, 12), pady=10)
 
     def _sidebar_btn(self, parent, text: str, command, danger: bool = False) -> tk.Label:
-        """
-        Create a reliably-styled sidebar button using tk.Label + click bindings.
-
-        Why not tk.Button? On macOS the Aqua theme overrides bg, rendering
-        the button in system style regardless of what colour we set — making
-        dark-background buttons unreadable. tk.Label always honours our colours.
-
-        danger=True gives the Leave button a subtle red tint to signal that
-        it is a destructive action.
-        """
-        bg_normal = "#4a1e2a" if danger else "#45475a"   # red-tint vs neutral
+        # create a sidebar button using tk.Label with click and hover bindings
+        # danger=True makes the Leave button red to show it is a risky action
+        bg_normal = "#4a1e2a" if danger else "#45475a"
         bg_hover  = "#6b2d3e" if danger else "#585b70"
         fg_colour = "#f38ba8" if danger else "#ffffff"
 
@@ -292,42 +279,33 @@ class ChatScreen(tk.Frame):
         return lbl
 
     def _build_welcome_frame(self, parent: tk.Misc) -> tk.Frame:
-        """
-        Build the welcome / empty-state screen shown before any room is joined.
-
-        Uses place(relx=0.5, rely=0.5) to perfectly centre the content card
-        regardless of window size, which is one of the few good uses of
-        Tkinter's place geometry manager.
-        """
+        # build the welcome screen shown when no room is open
         frame = tk.Frame(parent, bg=BG_DARK)
 
-        # Inner card — centred via place()
+        # place the card in the centre of the frame
         card = tk.Frame(frame, bg=BG_DARK)
         card.place(relx=0.5, rely=0.5, anchor="center")
 
-        # App icon
+        # app icon and title
         tk.Label(
             card, text="💬",
             font=("Helvetica", 52), bg=BG_DARK, fg=ACCENT,
         ).pack(pady=(0, 12))
 
-        # App title
         tk.Label(
             card, text="APC Instant Messenger",
             font=("Helvetica", 20, "bold"), bg=BG_DARK, fg=FG_MAIN,
         ).pack()
 
-        # Personalised welcome line — username is already set by the time
-        # ChatScreen is constructed (set in MessengerApp.show_chat before init)
+        # username is already set in MessengerApp.show_chat before this runs
         tk.Label(
             card, text=f"Welcome, {self.app.username}!",
             font=("Helvetica", 13), bg=BG_DARK, fg=FG_DIM,
         ).pack(pady=(6, 20))
 
-        # Divider
         tk.Frame(card, bg=BG_PANEL, height=1, width=340).pack(pady=(0, 18))
 
-        # Usage tips
+        # tips to help the user get started
         tips = [
             ("→", "Select a room from the left panel to start chatting"),
             ("＋", "Create a public room to open a new channel for everyone"),
@@ -347,7 +325,7 @@ class ChatScreen(tk.Frame):
                 font=("Helvetica", 11), bg=BG_DARK, fg=FG_DIM, anchor="w",
             ).pack(side="left")
 
-        # Footer status line
+        # status line at the bottom of the welcome card
         tk.Frame(card, bg=BG_PANEL, height=1, width=340).pack(pady=(20, 10))
         tk.Label(
             card, text="● Connected and ready",
@@ -357,20 +335,22 @@ class ChatScreen(tk.Frame):
         return frame
 
     def _show_welcome_screen(self) -> None:
-        """Hide the message display and show the welcome frame."""
+        """Show the welcome page and hide the chat area and input row."""
         self._msg_display.grid_remove()
         self._msg_scrollbar.grid_remove()
+        self._input_row.grid_remove()
         self._welcome_frame.grid(row=0, column=0, columnspan=2, sticky="nsew")
 
     def _hide_welcome_screen(self) -> None:
-        """Hide the welcome frame and restore the message display."""
+        """Hide the welcome page and bring back the chat area and input row."""
         self._welcome_frame.grid_remove()
         self._msg_display.grid(row=0, column=0, sticky="nsew")
         self._msg_scrollbar.grid(row=0, column=1, sticky="ns")
+        self._input_row.grid(row=2, column=0, columnspan=2, sticky="ew")
 
     def _setup_placeholder(self) -> None:
-        """Add a dim placeholder hint to the message entry."""
-        _ph = "Type a message…"
+        # add dim placeholder text to the message entry field
+        _ph = "Type a message..."
 
         def _focus_in(_e):
             if self._placeholder_active:
@@ -390,7 +370,7 @@ class ChatScreen(tk.Frame):
         self._msg_entry.bind("<FocusIn>",  _focus_in)
         self._msg_entry.bind("<FocusOut>", _focus_out)
 
-    # ── Right panel ───────────────────────────────────────────────────────
+    # right panel
 
     def _build_right_panel(self) -> None:
         right = tk.Frame(self, bg=BG_DARKER, width=160)
@@ -424,12 +404,10 @@ class ChatScreen(tk.Frame):
         )
         self._online_listbox.pack(fill="x", padx=8, pady=(0, 8))
 
-    # ------------------------------------------------------------------
-    # Room list – custom rows with badge support
-    # ------------------------------------------------------------------
+    # room list
 
     def _populate_room_list(self) -> None:
-        """Fill the left-panel room list with available public rooms."""
+        # fill the room list with the public rooms received at login
         for room in self.public_rooms:
             name = room["name"]
             self._message_store[name] = []
@@ -438,7 +416,7 @@ class ChatScreen(tk.Frame):
             self._make_room_row(name, private=False)
 
     def _add_room_to_list(self, name: str, private: bool = False) -> None:
-        """Insert a new room row into the scrollable list."""
+        # add a new room row to the sidebar list
         if name not in self._message_store:
             self._message_store[name] = []
             self._member_store[name]  = []
@@ -446,13 +424,7 @@ class ChatScreen(tk.Frame):
             self._make_room_row(name, private=private)
 
     def _make_room_row(self, name: str, private: bool = False) -> None:
-        """
-        Create a clickable room row with a red unread-badge slot.
-
-        Each row is a tk.Frame containing:
-          - a Label with the room name (expands to fill available width)
-          - a small Canvas that draws a red oval badge (hidden when count == 0)
-        """
+        # create one room row with a name label and an unread badge
         prefix = "🔒" if private else "#"
 
         row = tk.Frame(self._room_list_inner, bg=BG_DARKER, cursor="hand2")
@@ -467,7 +439,7 @@ class ChatScreen(tk.Frame):
         )
         name_lbl.grid(row=0, column=0, sticky="ew")
 
-        # Badge canvas — draws a red oval with white count text
+        # badge canvas that shows a red dot with the unread count
         badge = tk.Canvas(
             row, width=24, height=18,
             bg=BG_DARKER, highlightthickness=0,
@@ -478,11 +450,11 @@ class ChatScreen(tk.Frame):
         self._room_rows[name]      = row
         self._badge_canvases[name] = badge
 
-        # Click → select this room
+        # clicking anywhere on the row selects that room
         for w in (row, name_lbl, badge):
             w.bind("<Button-1>", lambda _e, r=name: self._select_room(r))
 
-        # Hover effects (skip when this is the active room)
+        # hover highlight (only when the room is not already selected)
         def _enter(_e, r=name):
             if r != self.active_room:
                 self._set_row_bg(r, BG_HOVER)
@@ -496,7 +468,7 @@ class ChatScreen(tk.Frame):
             w.bind("<Leave>", _leave)
 
     def _set_row_bg(self, room_name: str, colour: str) -> None:
-        """Set the background of a room row and all its child widgets."""
+        # change the background colour of a room row and all its children
         row = self._room_rows.get(room_name)
         if not row:
             return
@@ -508,17 +480,14 @@ class ChatScreen(tk.Frame):
                 pass
 
     def _update_badge(self, room_name: str) -> None:
-        """
-        Redraw the unread badge for a room.
-        Shows a red oval with a white count number; hides when count is 0.
-        """
+        # redraw the unread badge for a room, or hide it if count is 0
         count = self._unread.get(room_name, 0)
         badge = self._badge_canvases.get(room_name)
         if badge is None:
             return
         badge.delete("all")
         if count > 0:
-            badge.grid()   # make visible
+            badge.grid()   # show the badge
             label = str(count) if count < 100 else "99+"
             badge.create_oval(1, 1, 23, 17, fill=FG_RED, outline="")
             badge.create_text(12, 9, text=label, fill="white",
@@ -531,23 +500,23 @@ class ChatScreen(tk.Frame):
     # ------------------------------------------------------------------
 
     def _select_room(self, room_name: str) -> None:
-        """Handle clicking on a room row in the left panel."""
+        # called when the user clicks on a room in the sidebar
         if room_name == self.active_room:
             return
 
-        # De-highlight previously active room
+        # remove the highlight from the previous room
         if self.active_room:
             self._set_row_bg(self.active_room, BG_DARKER)
 
-        # Highlight the newly selected room
+        # highlight the newly selected room
         self._set_row_bg(room_name, BG_ACTIVE)
 
-        # Clear the unread badge immediately on selection
+        # clear the unread badge right away
         self._unread[room_name] = 0
         self._update_badge(room_name)
 
         if room_name in self._joined_rooms:
-            # Already joined on the server — switch the view locally only
+            # we already joined this room before, just switch the view locally
             self._hide_welcome_screen()
             self.active_room = room_name
             self._room_title.config(text=f"# {room_name}")
@@ -557,7 +526,7 @@ class ChatScreen(tk.Frame):
                 self._render_message(msg)
             self._refresh_member_list()
         else:
-            # Not yet joined — ask the server to add us
+            # not joined yet, ask the server to add us
             self.app.socket.emit("join_room", {"room": room_name})
 
     # ------------------------------------------------------------------
@@ -565,7 +534,7 @@ class ChatScreen(tk.Frame):
     # ------------------------------------------------------------------
 
     def handle_event(self, event: str, data: dict) -> None:
-        """Route a server event to the correct handler method."""
+        # send each server event to the right handler method
         handlers = {
             "room_joined":         self._on_room_joined,
             "room_created":        self._on_room_created,
@@ -616,7 +585,7 @@ class ChatScreen(tk.Frame):
         name = room["name"]
         if name not in self._message_store:
             self._add_room_to_list(name, private=True)
-        # Auto-join the room the user just created
+        # auto-join the room after creating it
         self.app.socket.emit("join_room", {"room": name})
 
     def _on_new_message(self, data: dict) -> None:
@@ -628,10 +597,10 @@ class ChatScreen(tk.Frame):
         self._message_store[room_name].append(data)
 
         if room_name == self.active_room:
-            # Room is open — render immediately
+            # room is open, show the message right away
             self._render_message(data)
         else:
-            # Room is in the background — increment the unread badge
+            # room is in the background, just update the badge count
             self._unread[room_name] += 1
             self._update_badge(room_name)
 
@@ -672,22 +641,22 @@ class ChatScreen(tk.Frame):
         messagebox.showerror("Server error", data.get("message", "Unknown error"))
 
     def _on_invite_sent(self, data: dict) -> None:
-        """Confirm to the inviter that their invite was delivered."""
+        # show a message to confirm the invite was sent
         target = data.get("target", "")
         room   = data.get("room", "")
         messagebox.showinfo("Invite sent", f"Invited {target} to '{room}'.")
 
     def _on_user_list_update(self, data: dict) -> None:
-        """Refresh the Online panel whenever someone joins or leaves."""
+        # rebuild the Online list every time someone connects or disconnects
         users = data.get("users", [])
         self._online_listbox.delete(0, tk.END)
-        # Use list comprehension to build display strings (APC requirement)
+        # build the display strings with a list comprehension (APC requirement)
         display = [f"● {u}" for u in users]
         for entry in display:
             self._online_listbox.insert(tk.END, entry)
 
     def _on_public_room_created(self, data: dict) -> None:
-        """Add a newly created public room to the room list."""
+        # add the new public room to the sidebar if it is not there yet
         room = data["room"]
         name = room["name"]
         if name not in self._message_store:
@@ -713,7 +682,7 @@ class ChatScreen(tk.Frame):
         self._msg_entry.delete(0, tk.END)
 
     def _send_image(self) -> None:
-        """Open a file dialog, encode the image as base64, send to server."""
+        # open a file picker, encode the image as base64 and send it
         if not self.active_room:
             messagebox.showwarning("No room", "Please join a room first.")
             return
@@ -749,20 +718,20 @@ class ChatScreen(tk.Frame):
             self.app.socket.emit("create_private_room", {"room": dialog.result})
 
     def _leave_room(self) -> None:
-        """Leave the currently active room."""
+        # leave the current room and go back to the welcome screen
         if not self.active_room:
             messagebox.showwarning("No room", "You are not in a room.")
             return
         leaving = self.active_room
         self.app.socket.emit("leave_room", {"room": leaving})
         self._joined_rooms.discard(leaving)
-        self._message_store[leaving] = []
+        self._message_store[leaving] = []  # clear stored messages
         self._member_store[leaving]  = []
         self._unread[leaving] = 0
         self._update_badge(leaving)
         self._set_row_bg(leaving, BG_DARKER)
         self.active_room = None
-        self._room_title.config(text="← Select a room")
+        self._room_title.config(text="<- Select a room")
         self._member_count_label.config(text="")
         self._clear_messages()
         self._refresh_member_list()
@@ -784,7 +753,7 @@ class ChatScreen(tk.Frame):
     # ------------------------------------------------------------------
 
     def _update_member_count(self) -> None:
-        """Update the member count label in the header bar."""
+        # update the member count shown in the header
         count = len(self._member_store.get(self.active_room, []))
         noun  = "member" if count == 1 else "members"
         self._member_count_label.config(text=f"👥 {count} {noun}")
@@ -795,13 +764,13 @@ class ChatScreen(tk.Frame):
         self._msg_display.config(state="disabled")
 
     def _render_message(self, msg: dict) -> None:
-        """Append a single message dict to the message display widget."""
+        # add one message to the chat display
         self._msg_display.config(state="normal")
         sender   = msg.get("sender", "?")
         ts       = msg.get("timestamp", "")
         msg_type = msg.get("type", "TextMessage")
 
-        # Choose tag set based on whether this is our own message
+        # use different tags depending on whether we sent this message
         is_own = (sender == self.app.username)
         s_tag, ts_tag, c_tag = (
             ("own_sender",   "own_timestamp",   "own_content")   if is_own else
@@ -837,14 +806,14 @@ class ChatScreen(tk.Frame):
         self._msg_display.see(tk.END)
 
     def _append_system(self, text: str) -> None:
-        """Append a system/status message in green italics, centred."""
+        # add a system message like "user joined" in green italic text
         self._msg_display.config(state="normal")
         self._msg_display.insert(tk.END, f"— {text} —\n", "system")
         self._msg_display.config(state="disabled")
         self._msg_display.see(tk.END)
 
     def _refresh_member_list(self) -> None:
-        """Rebuild the right-panel member listbox for the active room."""
+        # rebuild the member list for the currently open room
         self._member_listbox.delete(0, tk.END)
         members = self._member_store.get(self.active_room, [])
         for m in members:
@@ -856,14 +825,14 @@ class ChatScreen(tk.Frame):
 # ======================================================================
 
 class _SimpleInputDialog(tk.Toplevel):
-    """A minimal modal dialog that returns a single text value."""
+    """A small pop-up dialog that asks the user to type something."""
 
     def __init__(self, parent, title: str, prompt: str) -> None:
         super().__init__(parent)
         self.title(title)
         self.configure(bg=BG_DARKER)
         self.resizable(False, False)
-        self.grab_set()           # modal
+        self.grab_set()           # make it modal so you have to close it first
         self.result: str = ""
 
         tk.Label(
@@ -887,7 +856,7 @@ class _SimpleInputDialog(tk.Toplevel):
             activebackground="#b48ad4", activeforeground=BG_DARK,
         ).pack(pady=(0, 16))
 
-        self.wait_window()        # block until closed
+        self.wait_window()        # wait until the user closes the dialog
 
     def _submit(self) -> None:
         self.result = self._var.get().strip()
