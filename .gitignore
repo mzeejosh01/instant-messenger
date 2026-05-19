@@ -1,0 +1,25 @@
+# Python compiled files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE / editor folders
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and local config
+*.log
+instance/
